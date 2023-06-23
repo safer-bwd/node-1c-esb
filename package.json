@@ -1,0 +1,43 @@
+{
+  "name": "1c-esb",
+  "version": "0.1.0",
+  "description": "1C:ESB client for Node.js",
+  "main": "src/index.js",
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/safer-bwd/1c-esb.git"
+  },
+  "author": "Anton Safronov <safer.anton@gmail.com>",
+  "contributors": [
+    {
+      "name": "Rickaro",
+      "url": "https://github.com/Rickaro"
+    }
+  ],
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/safer-bwd/1c-esb/issues"
+  },
+  "homepage": "https://github.com/safer-bwd/1c-esb#readme",
+  "dependencies": {
+    "exponential-backoff": "^3.1.1",
+    "http-status-codes": "^2.2.0",
+    "lodash.get": "^4.4.2",
+    "lodash.merge": "^4.6.2",
+    "node-abort-controller": "^3.1.1",
+    "node-fetch": "^2.6.11",
+    "rhea-promise": "^3.0.1"
+  },
+  "devDependencies": {
+    "eslint": "^8.42.0",
+    "eslint-config-airbnb": "^19.0.4",
+    "eslint-plugin-import": "^2.27.5"
+  },
+  "engines": {
+    "node": ">= 10.0.0"
+  }
+}
