@@ -341,10 +341,11 @@ class Connection extends EventEmitter {
     });
   }
 
-  async _closeRheaConnection() {
-    this._connection._connection.set_reconnect(false);
+  _closeRheaConnection() {
     return this._connection.close().then(() => {
-      this._connection._connection.close(); // hack to stop reconnect
+      // hack to stop reconnect
+      this._connection._connection.set_reconnect(false);
+      this._connection._connection.close();
     });
   }
 
