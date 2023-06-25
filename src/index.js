@@ -345,7 +345,6 @@ class Connection extends EventEmitter {
     this._connection._connection.set_reconnect(false);
     return this._connection.close().then(() => {
       this._connection._connection.close(); // hack to stop reconnect
-      return Promise.resolve();
     });
   }
 
