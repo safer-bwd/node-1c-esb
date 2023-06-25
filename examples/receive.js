@@ -28,5 +28,6 @@ connection.on(ConnectionEvents.disconnected, (ctx) => log('Connection error', ct
   });
 
   await delay(5 * 1000);
+  await receiver.close();
   await connection.close();
 })().catch((err) => log('Send error:', err));

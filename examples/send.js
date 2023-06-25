@@ -39,5 +39,6 @@ connection.on(ConnectionEvents.disconnected, (ctx) => log('Connection error', ct
   const sender = await connection.createAwaitableSender(process, channel);
   const delivery = await sender.send(message);
   log(`Message sent -> delivery id ${delivery.id}`);
+  await sender.close();
   await connection.close();
 })().catch((err) => log('Send error:', err));
