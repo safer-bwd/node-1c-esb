@@ -11,6 +11,11 @@
     "type": "git",
     "url": "git+https://github.com/safer-bwd/1c-esb.git"
   },
+  "keywords": [
+    "1C:ESB",
+    "1C:Шина",
+    "rhea"
+  ],
   "author": "Anton Safronov <safer.anton@gmail.com>",
   "contributors": [
     {
