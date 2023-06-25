@@ -74,8 +74,7 @@ class Connection extends EventEmitter {
     this._options = sanitizeOptions(options);
     this._url = new URL(this._options.url);
     this._application = this._url.pathname.split('/').pop();
-    this._token = '';
-    this._channels = [];
+    this._channels = new Map();
     this._abortController = null;
     this._connection = this._createRheaConnection();
     this._bindRheaEvents();
@@ -87,10 +86,6 @@ class Connection extends EventEmitter {
 
   get url() {
     return this._url.href;
-  }
-
-  get channels() {
-    return this._channels;
   }
 
   open() {
@@ -134,8 +129,7 @@ class Connection extends EventEmitter {
     }
 
     const onClose = () => {
-      this._token = '';
-      this._channels = [];
+      this._channels = new Map();
       return Promise.resolve(this);
     };
 
@@ -151,8 +145,8 @@ class Connection extends EventEmitter {
   }
 
   getChannel(processName, channelName) {
-    const predicate = (it) => it.process === processName && it.channel === channelName;
-    return this._channels.find(predicate);
+    const key = `${processName}.${channelName}`;
+    return this._channels.get(key);
   }
 
   async createAwaitableSender(processName, channelName, options = {}) {
@@ -207,9 +201,12 @@ class Connection extends EventEmitter {
   }
 
   async _connect(abortSignal) {
+    let token; let
+      channels;
+
     try {
-      this._token = await this._getToken(abortSignal);
-      this._channels = await this._loadChannels(abortSignal);
+      token = await this._getToken(abortSignal);
+      channels = await this._loadChannels(token, abortSignal);
     } catch (error) {
       if (error instanceof ConnectionFatalError) {
         this.emit(RheaConnectionEvents.connectionError, { error });
@@ -222,10 +219,14 @@ class Connection extends EventEmitter {
       throw error;
     }
 
-    this._connection.options.username = this._token;
-    this._connection.options.password = this._token;
-
+    this._connection.options.username = token;
+    this._connection.options.password = token;
     await this._openRheaConnection(abortSignal);
+
+    this._channels = new Map(channels.map((channel) => {
+      const key = `${channel.process}.${channel.channel}`;
+      return [key, channel];
+    }));
   }
 
   async _getToken(abortSignal) {
@@ -270,12 +271,12 @@ class Connection extends EventEmitter {
     return token;
   }
 
-  async _loadChannels(abortSignal) {
+  async _loadChannels(token, abortSignal) {
     let response;
     try {
       response = await fetch(`${this._url.href}/sys/esb/runtime/channels`, {
         method: 'get',
-        headers: { Authorization: `Bearer ${this._token}` },
+        headers: { Authorization: `Bearer ${token}` },
         signal: abortSignal,
         timeout: this._options.operationTimeoutInSeconds * 1000,
       });
