@@ -2,7 +2,7 @@ const { EventEmitter } = require('events');
 const { StatusCodes: HttpStatusCodes } = require('http-status-codes');
 const fetch = require('node-fetch');
 const { Connection: RheaConnection, ConnectionEvents: RheaConnectionEvents } = require('rhea-promise');
-const { ConnectionError, ConnectionFatalError } = require('./errors');
+const { ConnectionError, ConnectionFatalError, ConnectionAbortError } = require('./errors');
 const { backOff, merge, get } = require('./utils');
 
 if (!global.AbortController) {
@@ -22,10 +22,10 @@ const retryableHttpStatusCodes = [
 const defaultReconnectOpts = {
   initialDelay: 100,
   maxDelay: 60 * 1000,
-  limit: 10,
+  limit: Infinity,
 };
 
-const defaultOperationTimeoutInSeconds = 1;
+const defaultOperationTimeoutInSeconds = 60;
 
 const defaultOpts = {
   url: '',
@@ -72,16 +72,13 @@ class Connection extends EventEmitter {
     super();
 
     this._options = sanitizeOptions(options);
-
     this._url = new URL(this._options.url);
     this._application = this._url.pathname.split('/').pop();
     this._token = '';
     this._channels = [];
-
+    this._abortController = null;
     this._connection = this._createRheaConnection();
     this._bindRheaEvents();
-
-    this._abortController = null;
   }
 
   get application() {
@@ -92,6 +89,10 @@ class Connection extends EventEmitter {
     return this._url.href;
   }
 
+  get channels() {
+    return this._channels;
+  }
+
   open() {
     if (this.isOpen()) {
       return Promise.resolve(this);
@@ -100,22 +101,31 @@ class Connection extends EventEmitter {
     this._abortController = new AbortController();
     const { signal: abortSignal } = this._abortController;
 
-    const onOpen = () => {
-      this._abortController = null;
-      return Promise.resolve(this);
-    };
+    let connectPromise;
+    if (this._options.reconnect) {
+      const onOpen = () => {
+        this._abortController = null;
+        this._delegateReconnectToRhea();
+        return Promise.resolve(this);
+      };
 
-    if (!this._options.reconnect) {
-      return this._connect(abortSignal).then(onOpen);
+      connectPromise = backOff(() => this._connect(abortSignal), {
+        startingDelay: this._options.reconnect.initialDelay,
+        maxDelay: this._options.reconnect.maxDelay,
+        numOfAttempts: this._options.reconnect.limit,
+        retry: (err) => !(err instanceof ConnectionFatalError)
+          && !(err instanceof ConnectionAbortError),
+      }).then(onOpen);
+    } else {
+      const onOpen = () => {
+        this._abortController = null;
+        return Promise.resolve(this);
+      };
+
+      connectPromise = this._connect(abortSignal).then(onOpen);
     }
 
-    return backOff(() => this._connect(abortSignal), {
-      delayFirstAttempt: false,
-      startingDelay: this._options.reconnect.initialDelay,
-      maxDelay: this._options.reconnect.maxDelay,
-      numOfAttempts: this._options.reconnect.limit,
-      retry: (err) => !(err instanceof ConnectionFatalError),
-    }).then(onOpen);
+    return connectPromise;
   }
 
   close() {
@@ -129,7 +139,7 @@ class Connection extends EventEmitter {
       return Promise.resolve(this);
     };
 
-    return this._connection.close().then(onClose);
+    return this._closeRheaConnection.then(onClose);
   }
 
   isOpen() {
@@ -140,16 +150,19 @@ class Connection extends EventEmitter {
     return this._connection.createSession(options);
   }
 
-  findRemoteChannel(processName, channelName) {
-    this._findChannel(processName, channelName);
+  getChannel(processName, channelName) {
+    const predicate = (it) => it.process === processName && it.channel === channelName;
+    return this._channels.find(predicate);
   }
 
   async createAwaitableSender(processName, channelName, options = {}) {
-    const channel = this._findChannel(processName, channelName);
+    if (!this.isOpen()) {
+      throw new Error('Connection is closed!');
+    }
+
+    const channel = this.getChannel(processName, channelName);
     if (!channel) {
-      throw new ConnectionError(`Channel '${processName}' for process '${processName}' not found`, {
-        process: processName, channel: channelName
-      });
+      throw new Error(`Channel '${processName}' for process '${processName}' not found`);
     }
 
     const sender = await this._connection.createAwaitableSender(merge(options, {
@@ -160,11 +173,13 @@ class Connection extends EventEmitter {
   }
 
   async createSender(processName, channelName, options = {}) {
-    const channel = this._findChannel(processName, channelName);
+    if (!this.isOpen()) {
+      throw new Error('Connection is closed!');
+    }
+
+    const channel = this.getChannel(processName, channelName);
     if (!channel) {
-      throw new ConnectionError(`Channel '${processName}' for process '${processName}' not found`, {
-        process: processName, channel: channelName
-      });
+      throw new Error(`Channel '${processName}' for process '${processName}' not found`);
     }
 
     const sender = await this._connection.createSender(merge(options, {
@@ -175,11 +190,13 @@ class Connection extends EventEmitter {
   }
 
   async createReceiver(processName, channelName, options = {}) {
-    const channel = this._findChannel(processName, channelName);
+    if (!this.isOpen()) {
+      throw new Error('Connection is closed!');
+    }
+
+    const channel = this.getChannel(processName, channelName);
     if (!channel) {
-      throw new ConnectionError(`Channel '${channelName}' for process '${processName}' not found`, {
-        process: processName, channel: channelName
-      });
+      throw new Error(`Channel '${processName}' for process '${processName}' not found`);
     }
 
     const receiver = await this._connection.createReceiver(merge(options, {
@@ -190,23 +207,25 @@ class Connection extends EventEmitter {
   }
 
   async _connect(abortSignal) {
-    await this._auth(abortSignal);
-    await this._openRheaConnection(abortSignal);
-  }
-
-  async _auth(abortSignal) {
     try {
       this._token = await this._getToken(abortSignal);
-      this._channels = await this._getChannels(abortSignal);
+      this._channels = await this._loadChannels(abortSignal);
     } catch (error) {
       if (error instanceof ConnectionFatalError) {
         this.emit(RheaConnectionEvents.connectionError, { error });
         this.emit(RheaConnectionEvents.connectionClose, { error });
+      } else if (error instanceof ConnectionAbortError) {
+        this.emit(RheaConnectionEvents.error, { error });
       } else {
         this.emit(RheaConnectionEvents.disconnected, { error });
       }
       throw error;
     }
+
+    this._connection.options.username = this._token;
+    this._connection.options.password = this._token;
+
+    await this._openRheaConnection(abortSignal);
   }
 
   async _getToken(abortSignal) {
@@ -228,7 +247,7 @@ class Connection extends EventEmitter {
     } catch (error) {
       const message = `Failed to get token: ${error.message}`;
       if (error.name === 'AbortError') {
-        throw new ConnectionFatalError(message, { error });
+        throw new ConnectionAbortError(message, { error });
       } else {
         throw new ConnectionError(message, { error });
       }
@@ -251,7 +270,7 @@ class Connection extends EventEmitter {
     return token;
   }
 
-  async _getChannels(abortSignal) {
+  async _loadChannels(abortSignal) {
     let response;
     try {
       response = await fetch(`${this._url.href}/sys/esb/runtime/channels`, {
@@ -263,7 +282,7 @@ class Connection extends EventEmitter {
     } catch (error) {
       const message = `Failed to get token: ${error.message}`;
       if (error.name === 'AbortError') {
-        throw new ConnectionFatalError(message, { error });
+        throw new ConnectionAbortError(message, { error });
       } else {
         throw new ConnectionError(message, { error });
       }
@@ -283,11 +302,6 @@ class Connection extends EventEmitter {
     return items;
   }
 
-  _findChannel(processName, channelName) {
-    const predicate = (it) => it.process === processName && it.channel === channelName;
-    return this._channels.find(predicate);
-  }
-
   _createRheaConnection() {
     const connection = new RheaConnection({
       ...this._options.amqp,
@@ -301,9 +315,6 @@ class Connection extends EventEmitter {
   }
 
   _openRheaConnection(abortSignal) {
-    this._connection.options.username = this._token;
-    this._connection.options.password = this._token;
-
     return new Promise((resolve, reject) => {
       let isClosed = false;
       const onClose = () => { isClosed = true; };
@@ -314,12 +325,11 @@ class Connection extends EventEmitter {
         .then(resolve)
         .catch((error) => {
           const message = `Failed to open AMQP connection: ${error.message}`;
-          if (isClosed || error.name === 'AbortError') {
+          if (isClosed) {
             reject(new ConnectionFatalError(message, { error }));
-            if (error.name === 'AbortError') {
-              this.emit(RheaConnectionEvents.connectionError, { error });
-              this.emit(RheaConnectionEvents.connectionClose, { error });
-            }
+          } else if (error.name === 'AbortError') {
+            this.emit(RheaConnectionEvents.error, { error });
+            reject(new ConnectionAbortError(message, { error }));
           } else {
             reject(new ConnectionError(message, { error }));
           }
@@ -330,10 +340,24 @@ class Connection extends EventEmitter {
     });
   }
 
+  _closeRheaConnection() {
+    this._connection._connection.set_reconnect(false);
+    return this._connection.close().then(() => {
+      this._connection._connection.close(); // hack to stop reconnect
+    });
+  }
+
   _bindRheaEvents() {
     Object.values(RheaConnectionEvents).forEach((eventName) => {
       this._connection.on(eventName, (...args) => this.emit(eventName, ...args));
     });
+  }
+
+  _delegateReconnectToRhea() {
+    this._connection.options.initial_reconnect_delay = this._options.reconnect.initialDelay;
+    this._connection.options.max_reconnect_delay = this._options.reconnect.maxDelay;
+    this._connection.options.reconnect_limit = this._options.reconnect.limit;
+    this._connection._connection.set_reconnect(true);
   }
 }
 

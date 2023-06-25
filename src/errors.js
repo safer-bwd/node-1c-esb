@@ -21,7 +21,15 @@ class ConnectionFatalError extends ExtendableError {
   }
 }
 
+class ConnectionAbortError extends ExtendableError {
+  constructor(...args) {
+    super(...args);
+    this.name = 'ConnectionAbortError';
+  }
+}
+
 module.exports = {
   ConnectionError,
   ConnectionFatalError,
+  ConnectionAbortError,
 };
