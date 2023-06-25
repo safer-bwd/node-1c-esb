@@ -88,7 +88,7 @@ class Connection extends EventEmitter {
     return this._url.href;
   }
 
-  open() {
+  async open() {
     if (this.isOpen()) {
       return Promise.resolve(this);
     }
@@ -123,7 +123,7 @@ class Connection extends EventEmitter {
     return connectPromise;
   }
 
-  close() {
+  async close() {
     if (this._abortController) {
       this._abortController.abort();
     }
@@ -133,7 +133,7 @@ class Connection extends EventEmitter {
       return Promise.resolve(this);
     };
 
-    return this._closeRheaConnection.then(onClose);
+    return this._closeRheaConnection().then(onClose);
   }
 
   isOpen() {
@@ -341,10 +341,11 @@ class Connection extends EventEmitter {
     });
   }
 
-  _closeRheaConnection() {
+  async _closeRheaConnection() {
     this._connection._connection.set_reconnect(false);
     return this._connection.close().then(() => {
       this._connection._connection.close(); // hack to stop reconnect
+      return Promise.resolve();
     });
   }
 
