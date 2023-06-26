@@ -96,31 +96,24 @@ class Connection extends EventEmitter {
     this._abortController = new AbortController();
     const { signal: abortSignal } = this._abortController;
 
-    let connectPromise;
-    if (this._options.reconnect) {
-      const onOpen = () => {
-        this._abortController = null;
+    const onOpen = () => {
+      this._abortController = null;
+      if (this._options.reconnect) {
         this._delegateReconnectToRhea();
-        return Promise.resolve(this);
-      };
+      }
+      return Promise.resolve(this);
+    };
 
-      connectPromise = backOff(() => this._connect(abortSignal), {
+    if (this._options.reconnect) {
+      return backOff(() => this._connect(abortSignal), {
         startingDelay: this._options.reconnect.initialDelay,
         maxDelay: this._options.reconnect.maxDelay,
         numOfAttempts: this._options.reconnect.limit,
         retry: (err) => !(err instanceof ConnectionFatalError)
           && !(err instanceof ConnectionAbortError),
       }).then(onOpen);
-    } else {
-      const onOpen = () => {
-        this._abortController = null;
-        return Promise.resolve(this);
-      };
-
-      connectPromise = this._connect(abortSignal).then(onOpen);
     }
-
-    return connectPromise;
+    return this._connect(abortSignal).then(onOpen);
   }
 
   async close() {
@@ -201,8 +194,8 @@ class Connection extends EventEmitter {
   }
 
   async _connect(abortSignal) {
-    let token; let
-      channels;
+    let token;
+    let channels;
 
     try {
       token = await this._getToken(abortSignal);
