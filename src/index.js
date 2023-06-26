@@ -149,7 +149,7 @@ class Connection extends EventEmitter {
 
     const channel = this.getChannel(processName, channelName);
     if (!channel) {
-      throw new Error(`Channel '${processName}' for process '${processName}' not found`);
+      throw new Error(`Channel '${channelName}' for process '${processName}' not found`);
     }
 
     const sender = await this._connection.createAwaitableSender(merge(options, {
@@ -166,7 +166,7 @@ class Connection extends EventEmitter {
 
     const channel = this.getChannel(processName, channelName);
     if (!channel) {
-      throw new Error(`Channel '${processName}' for process '${processName}' not found`);
+      throw new Error(`Channel '${channelName}' for process '${processName}' not found`);
     }
 
     const sender = await this._connection.createSender(merge(options, {
@@ -183,7 +183,7 @@ class Connection extends EventEmitter {
 
     const channel = this.getChannel(processName, channelName);
     if (!channel) {
-      throw new Error(`Channel '${processName}' for process '${processName}' not found`);
+      throw new Error(`Channel '${channelName}' for process '${processName}' not found`);
     }
 
     const receiver = await this._connection.createReceiver(merge(options, {
