@@ -1,6 +1,6 @@
 {
   "name": "1c-esb",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "1C:ESB client for Node.js",
   "main": "src/index.js",
   "scripts": {
@@ -13,7 +13,8 @@
   },
   "keywords": [
     "1C:ESB",
-    "1C:Шина",
+    "1С:Шина",
+    "1С Шина",
     "rhea"
   ],
   "author": "Anton Safronov <safer.anton@gmail.com>",
