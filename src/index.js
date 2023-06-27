@@ -104,16 +104,17 @@ class Connection extends EventEmitter {
       return Promise.resolve(this);
     };
 
-    if (this._options.reconnect) {
-      return backOff(() => this._connect(abortSignal), {
-        startingDelay: this._options.reconnect.initialDelay,
-        maxDelay: this._options.reconnect.maxDelay,
-        numOfAttempts: this._options.reconnect.limit,
-        retry: (err) => !(err instanceof ConnectionFatalError)
-          && !(err instanceof ConnectionAbortError),
-      }).then(onOpen);
+    if (!this._options.reconnect) {
+      return this._connect(abortSignal).then(onOpen);
     }
-    return this._connect(abortSignal).then(onOpen);
+
+    return backOff(() => this._connect(abortSignal), {
+      startingDelay: this._options.reconnect.initialDelay,
+      maxDelay: this._options.reconnect.maxDelay,
+      numOfAttempts: this._options.reconnect.limit,
+      retry: (err) => !(err instanceof ConnectionFatalError)
+        && !(err instanceof ConnectionAbortError),
+    }).then(onOpen);
   }
 
   async close() {
