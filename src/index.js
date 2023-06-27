@@ -22,7 +22,7 @@ const retryableHttpStatusCodes = [
 const defaultReconnectOpts = {
   initialDelay: 100,
   maxDelay: 60 * 1000,
-  limit: Infinity,
+  limit: 10,
 };
 
 const defaultOperationTimeoutInSeconds = 60;
