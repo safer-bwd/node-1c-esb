@@ -15,8 +15,6 @@ const createMessage = () => {
   const payload = { messageId };
   return {
     message_id: messageId,
-    content_type: 'application/json',
-    content_encoding: 'utf8',
     body: rheaMessage.data_section(Buffer.from(JSON.stringify(payload), 'utf8')),
     application_properties: {
       integ_message_id: messageId,
@@ -37,8 +35,8 @@ connection.on(ConnectionEvents.disconnected, (ctx) => log('Connection error', ct
   await connection.open();
   const message = createMessage();
   const sender = await connection.createAwaitableSender(process, channel);
-  const delivery = await sender.send(message);
-  log(`Message sent -> delivery id ${delivery.id}`);
+  await sender.send(message);
+  log('Sent message -->', message);
   await sender.close();
   await connection.close();
 })().catch((err) => log('Send error:', err));
