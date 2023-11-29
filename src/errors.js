@@ -1,35 +1,26 @@
-class ExtendableError extends Error {
+class IConnectionError extends Error {
   constructor(message, data) {
     super(message);
-    this.name = 'ExtendableError';
     this.data = data;
     Error.captureStackTrace(this, this.constructor);
   }
 }
 
-class ConnectionError extends ExtendableError {
-  constructor(...args) {
-    super(...args);
+class ConnectionError extends IConnectionError {
+  constructor(message, data) {
+    super(message || 'Connection error!', data);
     this.name = 'ConnectionError';
   }
 }
 
-class ConnectionFatalError extends ExtendableError {
-  constructor(...args) {
-    super(...args);
-    this.name = 'ConnectionFatalError';
-  }
-}
-
-class ConnectionAbortError extends ExtendableError {
-  constructor(...args) {
-    super(...args);
+class ConnectionAbortError extends IConnectionError {
+  constructor(message, data) {
+    super(message || 'Connection abort error!', data);
     this.name = 'ConnectionAbortError';
   }
 }
 
 module.exports = {
   ConnectionError,
-  ConnectionFatalError,
   ConnectionAbortError,
 };

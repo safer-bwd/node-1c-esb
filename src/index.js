@@ -1,41 +1,32 @@
 const { EventEmitter } = require('events');
-const { StatusCodes: HttpStatusCodes } = require('http-status-codes');
 const fetch = require('node-fetch');
-const { Connection: RheaConnection, ConnectionEvents: RheaConnectionEvents } = require('rhea-promise');
-const { ConnectionError, ConnectionFatalError, ConnectionAbortError } = require('./errors');
-const { backOff, merge, get } = require('./utils');
+const { Connection: RheaConnection, ConnectionEvents } = require('rhea-promise');
+const merge = require('lodash.merge');
+const ConnectionErrors = require('./errors');
 
-if (!global.AbortController) {
-  // eslint-disable-next-line global-require
-  global.AbortController = require('node-abort-controller').AbortController;
-}
+const { ConnectionError, ConnectionAbortError } = ConnectionErrors;
 
-const retryableHttpStatusCodes = [
-  HttpStatusCodes.REQUEST_TIMEOUT,
-  HttpStatusCodes.TOO_MANY_REQUESTS,
-  HttpStatusCodes.INTERNAL_SERVER_ERROR,
-  HttpStatusCodes.BAD_GATEWAY,
-  HttpStatusCodes.SERVICE_UNAVAILABLE,
-  HttpStatusCodes.GATEWAY_TIMEOUT,
-];
-
-const defaultReconnectOpts = {
-  initialDelay: 100,
-  maxDelay: 60 * 1000,
-  limit: 10,
+const defaultReconnect = {
+  numOfAttempts: 10,
+  startingDelay: 100,
+  maxDelay: 10 * 1000,
 };
 
-const defaultOperationTimeoutInSeconds = 60;
-
 const defaultOpts = {
+  // application URL
+  // https://[hostname]:[port]/applications/[applicationName]
   url: '',
+
+  // credentionals (oidc)
   clientKey: '',
   clientSecret: '',
 
-  reconnect: defaultReconnectOpts,
+  // reconnect after disconnect
+  reconnect: true,
 
-  operationTimeoutInSeconds: defaultOperationTimeoutInSeconds,
+  operationTimeoutInSeconds: 60,
 
+  // rhea connection options
   // https://github.com/amqp/rhea#connectoptions
   amqp: {
     // https://its.1c.ru/db/esbdoc3/content/20006/hdoc
@@ -46,22 +37,22 @@ const defaultOpts = {
 };
 
 const sanitizeOptions = (options) => {
-  const sanitizedOpts = merge(defaultOpts, options);
+  const sanitizedOpts = merge({}, defaultOpts, options);
 
   if (sanitizedOpts.reconnect) {
     if (typeof sanitizedOpts.reconnect === 'object') {
-      sanitizedOpts.reconnect = merge(defaultReconnectOpts, sanitizedOpts.reconnect);
+      sanitizedOpts.reconnect = merge({}, defaultReconnect, sanitizedOpts.reconnect);
     } else {
-      sanitizedOpts.reconnect = defaultReconnectOpts;
+      sanitizedOpts.reconnect = defaultReconnect;
     }
   }
 
   if (!sanitizedOpts.amqp) {
-    sanitizedOpts.amqp = {};
+    sanitizedOpts.amqp = defaultOpts.amqp;
   }
 
   if (!sanitizedOpts.operationTimeoutInSeconds) {
-    sanitizedOpts.operationTimeoutInSeconds = defaultOperationTimeoutInSeconds;
+    sanitizedOpts.operationTimeoutInSeconds = defaultOpts.operationTimeoutInSeconds;
   }
 
   return sanitizedOpts;
@@ -72,70 +63,97 @@ class Connection extends EventEmitter {
     super();
 
     this._options = sanitizeOptions(options);
+
+    // application URL
+    // https://[hostname]:[port]/applications/[applicationName]
     this._url = new URL(this._options.url);
-    this._application = this._url.pathname.split('/').pop();
+
+    // application unique string id per server (part of application URL)
+    this._applicationId = this._url.pathname.split('/').pop();
+
+    // application channels map
     this._channels = new Map();
-    this._abortController = null;
-    this._connection = this._createRheaConnection();
-    this._bindRheaEvents();
+
+    // rhea connection object
+    this._connection = null;
   }
 
-  get application() {
-    return this._application;
+  get id() {
+    if (!this._connection) {
+      return '';
+    }
+
+    return this._connection.id;
+  }
+
+  get applicationId() {
+    return this._applicationId;
   }
 
   get url() {
     return this._url.href;
   }
 
-  async open() {
+  get channels() {
+    return [...this._channels.values()];
+  }
+
+  open(options = {}) {
     if (this.isOpen()) {
       return Promise.resolve(this);
     }
 
-    this._abortController = new AbortController();
-    const { signal: abortSignal } = this._abortController;
-
-    const onOpen = () => {
-      this._abortController = null;
-      if (this._options.reconnect) {
-        this._delegateReconnectToRhea();
-      }
-      return Promise.resolve(this);
+    const onOpen = () => this;
+    const onError = (err) => {
+      this._closeConnection().catch((error) => {
+        this.emit(ConnectionEvents.error, { error });
+      });
+      throw err;
     };
 
-    if (!this._options.reconnect) {
-      return this._connect(abortSignal).then(onOpen);
-    }
-
-    return backOff(() => this._connect(abortSignal), {
-      startingDelay: this._options.reconnect.initialDelay,
-      maxDelay: this._options.reconnect.maxDelay,
-      numOfAttempts: this._options.reconnect.limit,
-      retry: (err) => !(err instanceof ConnectionFatalError)
-        && !(err instanceof ConnectionAbortError),
-    }).then(onOpen);
+    return this._openConnection(options)
+      .then(onOpen)
+      .catch(onError);
   }
 
-  async close() {
-    if (this._abortController) {
-      this._abortController.abort();
-    }
-
-    const onClose = () => {
-      this._channels = new Map();
-      return Promise.resolve(this);
+  close(options = {}) {
+    const onClose = () => this;
+    const onError = (error) => {
+      this.emit(ConnectionEvents.error, { error });
+      throw error;
     };
 
-    return this._closeRheaConnection().then(onClose);
+    return this._closeConnection(options)
+      .then(onClose)
+      .catch(onError);
   }
 
   isOpen() {
-    return this._connection.isOpen();
+    return !!(this._connection && this._connection.isOpen());
   }
 
-  createSession(options) {
-    return this._connection.createSession(options);
+  isRemoteOpen() {
+    return !!(this._connection && this._connection.isRemoteOpen());
+  }
+
+  wasCloseInitiated() {
+    return !!(this._connection && this._connection.wasCloseInitiated());
+  }
+
+  async createSession(options = {}) {
+    if (!this.isOpen()) {
+      throw new Error('Connection is closed!');
+    }
+
+    const session = await this._connection.createSession(options);
+
+    return session;
+  }
+
+  removeAllSessions() {
+    if (this._connection) {
+      this._connection.removeAllSessions();
+    }
   }
 
   getChannel(processName, channelName) {
@@ -194,42 +212,38 @@ class Connection extends EventEmitter {
     return receiver;
   }
 
-  async _connect(abortSignal) {
+  async _openConnection(options) {
     let token;
-    let channels;
 
     try {
-      token = await this._getToken(abortSignal);
-      channels = await this._loadChannels(token, abortSignal);
+      token = await this._fetchToken(options);
+      const channels = await this._fetchChannels(token, options);
+      this._channels = new Map(channels.map((channel) => {
+        const key = `${channel.process}.${channel.channel}`;
+        return [key, channel];
+      }));
     } catch (error) {
-      if (error instanceof ConnectionFatalError) {
-        this.emit(RheaConnectionEvents.connectionError, { error });
-        this.emit(RheaConnectionEvents.connectionClose, { error });
-      } else if (error instanceof ConnectionAbortError) {
-        this.emit(RheaConnectionEvents.error, { error });
-      } else {
-        this.emit(RheaConnectionEvents.disconnected, { error });
-      }
+      this.emit(ConnectionEvents.connectionError, { error });
+      this.emit(ConnectionEvents.disconnected, { error });
       throw error;
     }
 
-    this._connection.options.username = token;
-    this._connection.options.password = token;
-    await this._openRheaConnection(abortSignal);
-
-    this._channels = new Map(channels.map((channel) => {
-      const key = `${channel.process}.${channel.channel}`;
-      return [key, channel];
-    }));
+    await this._openRheaConnection(token, options);
   }
 
-  async _getToken(abortSignal) {
-    const { clientKey, clientSecret } = this._options;
+  async _fetchToken(options) {
+    const { abortSignal } = options;
+
+    const {
+      clientKey, clientSecret, operationTimeoutInSeconds
+    } = this._options;
+
     const authStr = Buffer.from(`${clientKey}:${clientSecret}`, 'utf8').toString('base64');
+    const url = `${this._url.origin}/auth/oidc/token`;
 
     let response;
     try {
-      response = await fetch(`${this._url.origin}/auth/oidc/token`, {
+      response = await fetch(url, {
         method: 'post',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -237,45 +251,88 @@ class Connection extends EventEmitter {
         },
         body: 'grant_type=client_credentials',
         signal: abortSignal,
-        timeout: this._options.operationTimeoutInSeconds * 1000,
+        timeout: operationTimeoutInSeconds * 1000,
       });
     } catch (error) {
-      const message = `Failed to get token: ${error.message}`;
       if (error.name === 'AbortError') {
-        throw new ConnectionAbortError(message, { error });
+        throw new ConnectionAbortError('Abort fetch token!', { url, error });
       } else {
-        throw new ConnectionError(message, { error });
+        throw new ConnectionError(`Failed to fetch token: ${error.message}`, { url, error });
       }
     }
 
-    const data = await response.json();
-
-    if (response.status !== HttpStatusCodes.OK) {
-      const description = get(data, 'error.message', `Server returned ${response.status}`);
-      const message = `Failed to get token: ${description}`;
-      if (retryableHttpStatusCodes.includes(response.status)) {
-        throw new ConnectionError(message, { body: data, status: response.status });
-      } else {
-        throw new ConnectionFatalError(message, { body: data, status: response.status });
-      }
+    let json;
+    try {
+      json = await response.json();
+    } catch (err) {
+      json = {};
     }
 
-    const { id_token: token } = data;
+    if (response.status !== 200) {
+      const description = `Server returned ${response.status} ${json && json.error && json.error.message}`;
+      throw new ConnectionError(`Failed to fetch token: ${description}`, { url, response });
+    }
+
+    const { id_token: token } = json;
 
     return token;
   }
 
-  async _loadChannels(token, abortSignal) {
+  async _fetchChannels(token, options) {
+    const { abortSignal } = options;
+    const { operationTimeoutInSeconds } = this._options;
+
+    const url = `${this._url.href}/sys/esb/runtime/channels`;
+
     let response;
     try {
       response = await fetch(`${this._url.href}/sys/esb/runtime/channels`, {
         method: 'get',
         headers: { Authorization: `Bearer ${token}` },
         signal: abortSignal,
-        timeout: this._options.operationTimeoutInSeconds * 1000,
+        timeout: operationTimeoutInSeconds * 1000,
       });
     } catch (error) {
-      const message = `Failed to get token: ${error.message}`;
+      if (error.name === 'AbortError') {
+        throw new ConnectionAbortError('Abort fetch remote channels!', { url, error });
+      } else {
+        throw new ConnectionError(`Failed to fetch remote channels: ${error.message}`, { url, error });
+      }
+    }
+
+    if (response.status !== 200) {
+      const message = `Failed to fetch remote channels: Server returned ${response.status}`;
+      throw new ConnectionError(message, { url, response });
+    }
+
+    const json = await response.json();
+    const { items } = json;
+
+    return items;
+  }
+
+  async _openRheaConnection(token, options) {
+    const { reconnect, operationTimeoutInSeconds } = this._options;
+
+    this._connection = new RheaConnection({
+      ...this._options.amqp,
+      host: this._url.hostname,
+      vhost: `/applications/${this.applicationId}`,
+      username: token,
+      password: token,
+      reconnect: false, // set reconnect after open connection
+      operationTimeoutInSeconds,
+    });
+
+    // bind rhea events
+    Object.values(ConnectionEvents).forEach((eventName) => {
+      this._connection.on(eventName, (...args) => this.emit(eventName, ...args));
+    });
+
+    try {
+      await this._connection.open(options);
+    } catch (error) {
+      const message = `Failed to open AMQP connection: ${error.message}`;
       if (error.name === 'AbortError') {
         throw new ConnectionAbortError(message, { error });
       } else {
@@ -283,81 +340,33 @@ class Connection extends EventEmitter {
       }
     }
 
-    if (response.status !== HttpStatusCodes.OK) {
-      const message = `Failed to get remote channels: Server returned ${response.status}`;
-      if (retryableHttpStatusCodes.includes(response.status)) {
-        throw new ConnectionError(message, { status: response.status });
-      } else {
-        throw new ConnectionFatalError(message, { status: response.status });
-      }
+    // set reconnect
+    if (reconnect) {
+      const { numOfAttempts, startingDelay, maxDelay } = reconnect;
+      this._connection.options.reconnect_limit = numOfAttempts;
+      this._connection.options.initial_reconnect_delay = startingDelay;
+      this._connection.options.max_reconnect_delay = maxDelay;
+      this._connection._connection.set_reconnect(true);
     }
-
-    const { items } = await response.json();
-
-    return items;
   }
 
-  _createRheaConnection() {
-    const connection = new RheaConnection({
-      ...this._options.amqp,
-      host: this._url.hostname,
-      vhost: `/applications/${this.application}`,
-      reconnect: false,
-      defaultOperationTimeoutInSecond: this._options.defaultOperationTimeoutInSecond,
-    });
-
-    return connection;
+  async _closeConnection(options) {
+    await this._closeRheaConnection(options);
+    this._channels = new Map();
   }
 
-  _openRheaConnection(abortSignal) {
-    return new Promise((resolve, reject) => {
-      let isClosed = false;
-      const onClose = () => { isClosed = true; };
-
-      this._connection.once(RheaConnectionEvents.connectionClose, onClose);
-
-      this._connection.open({ abortSignal })
-        .then(resolve)
-        .catch((error) => {
-          const message = `Failed to open AMQP connection: ${error.message}`;
-          if (isClosed) {
-            reject(new ConnectionFatalError(message, { error }));
-          } else if (error.name === 'AbortError') {
-            this.emit(RheaConnectionEvents.error, { error });
-            reject(new ConnectionAbortError(message, { error }));
-          } else {
-            reject(new ConnectionError(message, { error }));
-          }
-        })
-        .finally(() => {
-          this._connection.removeListener(RheaConnectionEvents.connectionClose, onClose);
-        });
-    });
-  }
-
-  _closeRheaConnection() {
-    return this._connection.close().then(() => {
-      // hack to stop reconnect
+  async _closeRheaConnection(options) {
+    if (this._connection) {
+      await this._connection.close(options);
+      // stop reconnect
       this._connection._connection.set_reconnect(false);
       this._connection._connection.close();
-    });
-  }
-
-  _bindRheaEvents() {
-    Object.values(RheaConnectionEvents).forEach((eventName) => {
-      this._connection.on(eventName, (...args) => this.emit(eventName, ...args));
-    });
-  }
-
-  _delegateReconnectToRhea() {
-    this._connection.options.initial_reconnect_delay = this._options.reconnect.initialDelay;
-    this._connection.options.max_reconnect_delay = this._options.reconnect.maxDelay;
-    this._connection.options.reconnect_limit = this._options.reconnect.limit;
-    this._connection._connection.set_reconnect(true);
+    }
   }
 }
 
 module.exports = {
   Connection,
-  ConnectionEvents: RheaConnectionEvents
+  ConnectionErrors,
+  ConnectionEvents,
 };

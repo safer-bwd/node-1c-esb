@@ -1,6 +1,6 @@
 {
   "name": "1c-esb",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "1C:ESB client for Node.js",
   "main": "src/index.js",
   "scripts": {
@@ -33,17 +33,13 @@
     "rhea-promise": "^3.0.0"
   },
   "dependencies": {
-    "exponential-backoff": "^3.1.1",
-    "http-status-codes": "^2.2.0",
-    "lodash.get": "^4.4.2",
     "lodash.merge": "^4.6.2",
-    "node-abort-controller": "^3.1.1",
-    "node-fetch": "^2.6.11"
+    "node-fetch": "^2.7.0"
   },
   "devDependencies": {
-    "eslint": "^8.42.0",
+    "eslint": "^8.54.0",
     "eslint-config-airbnb": "^19.0.4",
-    "eslint-plugin-import": "^2.27.5",
+    "eslint-plugin-import": "^2.29.0",
     "rhea-promise": "^3.0.1"
   }
 }
