@@ -6,12 +6,6 @@ const ConnectionErrors = require('./errors');
 
 const { ConnectionError, ConnectionAbortError } = ConnectionErrors;
 
-const defaultReconnect = {
-  numOfAttempts: 10,
-  startingDelay: 100,
-  maxDelay: 10 * 1000,
-};
-
 const defaultOpts = {
   // application URL
   // https://[hostname]:[port]/applications/[applicationName]
@@ -20,9 +14,6 @@ const defaultOpts = {
   // credentionals (oidc)
   clientKey: '',
   clientSecret: '',
-
-  // reconnect after disconnect
-  reconnect: true,
 
   operationTimeoutInSeconds: 60,
 
@@ -33,22 +24,23 @@ const defaultOpts = {
     port: 6698,
     max_frame_size: 1000000,
     channel_max: 7000,
+    reconnect: {
+      reconnect_limit: 10,
+      initial_reconnect_delay: 100,
+      max_reconnect_delay: 10 * 1000,
+    },
   },
 };
 
 const sanitizeOptions = (options) => {
   const sanitizedOpts = merge({}, defaultOpts, options);
 
-  if (sanitizedOpts.reconnect) {
-    if (typeof sanitizedOpts.reconnect === 'object') {
-      sanitizedOpts.reconnect = merge({}, defaultReconnect, sanitizedOpts.reconnect);
-    } else {
-      sanitizedOpts.reconnect = defaultReconnect;
-    }
-  }
-
   if (!sanitizedOpts.amqp) {
     sanitizedOpts.amqp = defaultOpts.amqp;
+  }
+
+  if (sanitizedOpts.amqp.reconnect === true) {
+    sanitizedOpts.amqp.reconnect = defaultOpts.amqp.reconnect;
   }
 
   if (!sanitizedOpts.operationTimeoutInSeconds) {
@@ -312,7 +304,7 @@ class Connection extends EventEmitter {
   }
 
   async _openRheaConnection(token, options) {
-    const { reconnect, operationTimeoutInSeconds } = this._options;
+    const { operationTimeoutInSeconds } = this._options;
 
     this._connection = new RheaConnection({
       ...this._options.amqp,
@@ -341,11 +333,8 @@ class Connection extends EventEmitter {
     }
 
     // set reconnect
-    if (reconnect) {
-      const { numOfAttempts, startingDelay, maxDelay } = reconnect;
-      this._connection.options.reconnect_limit = numOfAttempts;
-      this._connection.options.initial_reconnect_delay = startingDelay;
-      this._connection.options.max_reconnect_delay = maxDelay;
+    if (this._options.amqp.reconnect) {
+      this._connection.options = merge(this._connection.options, this._options.amqp.reconnect);
       this._connection._connection.set_reconnect(true);
     }
   }

@@ -23,7 +23,7 @@ const createMessage = () => {
 };
 
 const connection = new Connection({
-  url, clientKey, clientSecret, reconnect: false,
+  url, clientKey, clientSecret, amqp: { reconnect: false }
 });
 
 connection.on(ConnectionEvents.connectionOpen, () => log('Connection opened'));

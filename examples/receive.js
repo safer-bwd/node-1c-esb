@@ -11,7 +11,7 @@ const channel = 'to_trade';
 const log = (...args) => console.log(`${JSON.stringify(new Date())}`, ...args);
 
 const connection = new Connection({
-  url, clientKey, clientSecret, reconnect: false,
+  url, clientKey, clientSecret, amqp: { reconnect: false }
 });
 
 connection.on(ConnectionEvents.connectionOpen, () => log('Connection opened'));
