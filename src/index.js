@@ -19,15 +19,15 @@ const defaultOpts = {
 
   // rhea connection options
   // https://github.com/amqp/rhea#connectoptions
+  // https://its.1c.ru/db/esbdoc3/content/20006/hdoc
   amqp: {
-    // https://its.1c.ru/db/esbdoc3/content/20006/hdoc
     port: 6698,
     max_frame_size: 1000000,
     channel_max: 7000,
     reconnect: {
       reconnect_limit: 10,
       initial_reconnect_delay: 100,
-      max_reconnect_delay: 10 * 1000,
+      max_reconnect_delay: 60 * 1000,
     },
   },
 };
