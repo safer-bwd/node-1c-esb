@@ -346,10 +346,11 @@ class Connection extends EventEmitter {
 
   async _closeRheaConnection(options) {
     if (this._connection) {
-      await this._connection.close(options);
       // stop reconnect
       this._connection._connection.set_reconnect(false);
       this._connection._connection.close();
+
+      await this._connection.close(options);
     }
   }
 }
