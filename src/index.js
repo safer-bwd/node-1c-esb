@@ -279,7 +279,6 @@ class Connection extends EventEmitter {
     }
 
     const { id_token: token } = json;
-
     debug('[%s] token: %s', this.applicationId, token);
 
     return token;
@@ -320,7 +319,6 @@ class Connection extends EventEmitter {
 
     const json = await response.json();
     const { items } = json;
-
     debug('[%s] channels: %o', this.applicationId, items);
 
     return items;
