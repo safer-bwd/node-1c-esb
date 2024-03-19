@@ -356,7 +356,7 @@ class Connection extends EventEmitter {
       }
     }
 
-    debug('[%s] amqp: connected (id = %s)', this.applicationId, this._connection.id);
+    debug('[%s] amqp: connected (%s)', this.applicationId, this._connection.id);
 
     // set reconnect
     if (this._options.amqp.reconnect) {
