@@ -380,11 +380,12 @@ class Connection extends EventEmitter {
       return Promise.resolve();
     }
 
-    debug('[%s] amqp: connection (%s) closing...', this.applicationId, this._connection.id);
-
     return new Promise((resolve, reject) => {
+      debug('[%s] amqp: connection (%s) closing...', this.applicationId, this._connection.id);
+
       this._connection.once(ConnectionEvents.connectionClose, () => {
         debug('[%s] amqp: connection (%s) closed', this.applicationId, this._connection.id);
+        this._connection = null;
         resolve();
       });
 
