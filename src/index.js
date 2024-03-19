@@ -2,6 +2,7 @@ const { EventEmitter } = require('events');
 const fetch = require('node-fetch');
 const { Connection: RheaConnection, ConnectionEvents } = require('rhea-promise');
 const merge = require('lodash.merge');
+const debug = require('debug')('1c-esb');
 const ConnectionErrors = require('./errors');
 
 const { ConnectionError, ConnectionAbortError } = ConnectionErrors;
@@ -207,6 +208,8 @@ class Connection extends EventEmitter {
   async _openConnection(options) {
     let token;
 
+    debug('[%s] connecting...', this.applicationId);
+
     try {
       token = await this._fetchToken(options);
       const channels = await this._fetchChannels(token, options);
@@ -221,6 +224,8 @@ class Connection extends EventEmitter {
     }
 
     await this._openRheaConnection(token, options);
+
+    debug('[%s] connected', this.applicationId);
   }
 
   async _fetchToken(options) {
@@ -233,8 +238,13 @@ class Connection extends EventEmitter {
     const authStr = Buffer.from(`${clientKey}:${clientSecret}`, 'utf8').toString('base64');
     const url = `${this._url.origin}/auth/oidc/token`;
 
+    debug('[%s] token: url = %s', this.applicationId, url);
+    debug('[%s] token: client key = %s', this.applicationId, clientKey);
+    debug('[%s] token: client secret = %s', this.applicationId, clientSecret);
+
     let response;
     try {
+      debug('[%s] token: -> send request', this.applicationId);
       response = await fetch(url, {
         method: 'post',
         headers: {
@@ -245,7 +255,9 @@ class Connection extends EventEmitter {
         signal: abortSignal,
         timeout: operationTimeoutInSeconds * 1000,
       });
+      debug('[%s] token: <- recieved response (status = %d)', this.applicationId, response.status);
     } catch (error) {
+      debug('[%s] token: request error %o', this.applicationId, error);
       if (error.name === 'AbortError') {
         throw new ConnectionAbortError('Abort fetch token!', { url, error });
       } else {
@@ -261,11 +273,14 @@ class Connection extends EventEmitter {
     }
 
     if (response.status !== 200) {
+      debug('[%s] token: response error %o', this.applicationId, json);
       const description = `Server returned ${response.status} ${json && json.error && json.error.message}`;
       throw new ConnectionError(`Failed to fetch token: ${description}`, { url, response });
     }
 
     const { id_token: token } = json;
+
+    debug('[%s] token: %s', this.applicationId, token);
 
     return token;
   }
@@ -276,15 +291,20 @@ class Connection extends EventEmitter {
 
     const url = `${this._url.href}/sys/esb/runtime/channels`;
 
+    debug('[%s] channels: url = %s', this.applicationId, url);
+
     let response;
     try {
+      debug('[%s] channels: -> send request', this.applicationId);
       response = await fetch(`${this._url.href}/sys/esb/runtime/channels`, {
         method: 'get',
         headers: { Authorization: `Bearer ${token}` },
         signal: abortSignal,
         timeout: operationTimeoutInSeconds * 1000,
       });
+      debug('[%s] channels: <- recieved response (status = %d)', this.applicationId, response.status);
     } catch (error) {
+      debug('[%s] channels: request error %o', this.applicationId, error);
       if (error.name === 'AbortError') {
         throw new ConnectionAbortError('Abort fetch remote channels!', { url, error });
       } else {
@@ -293,6 +313,7 @@ class Connection extends EventEmitter {
     }
 
     if (response.status !== 200) {
+      debug('[%s] channels: response error', this.applicationId);
       const message = `Failed to fetch remote channels: Server returned ${response.status}`;
       throw new ConnectionError(message, { url, response });
     }
@@ -300,11 +321,15 @@ class Connection extends EventEmitter {
     const json = await response.json();
     const { items } = json;
 
+    debug('[%s] channels: %o', this.applicationId, items);
+
     return items;
   }
 
   async _openRheaConnection(token, options) {
     const { operationTimeoutInSeconds } = this._options;
+
+    debug('[%s] amqp: connecting...', this.applicationId);
 
     this._connection = new RheaConnection({
       ...this._options.amqp,
@@ -324,6 +349,7 @@ class Connection extends EventEmitter {
     try {
       await this._connection.open(options);
     } catch (error) {
+      debug('[%s] amqp: error', this.applicationId, error);
       const message = `Failed to open AMQP connection: ${error.message}`;
       if (error.name === 'AbortError') {
         throw new ConnectionAbortError(message, { error });
@@ -332,25 +358,35 @@ class Connection extends EventEmitter {
       }
     }
 
+    debug('[%s] amqp: connected', this.applicationId);
+
     // set reconnect
     if (this._options.amqp.reconnect) {
       this._connection.options = merge(this._connection.options, this._options.amqp.reconnect);
       this._connection._connection.set_reconnect(true);
+      debug('[%s] amqp: set reconnect true', this.applicationId);
     }
   }
 
   async _closeConnection(options) {
+    debug('[%s] connection closing...', this.applicationId);
     await this._closeRheaConnection(options);
     this._channels = new Map();
+    debug('[%s] connection closed', this.applicationId);
   }
 
   async _closeRheaConnection(options) {
     if (this._connection) {
+      debug('[%s] amqp: connection closing...', this.applicationId);
+
       // stop reconnect
       this._connection._connection.set_reconnect(false);
-      this._connection._connection.close();
+      debug('[%s] amqp: set reconnect false', this.applicationId);
 
+      this._connection._connection.close();
       await this._connection.close(options);
+      this._connection = null;
+      debug('[%s] amqp: connection closed', this.applicationId);
     }
   }
 }
