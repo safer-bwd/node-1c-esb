@@ -356,7 +356,7 @@ class Connection extends EventEmitter {
       }
     }
 
-    debug('[%s] amqp: connected', this.applicationId);
+    debug('[%s] amqp: connected (id = %s)', this.applicationId, this._connection.id);
 
     // set reconnect
     if (this._options.amqp.reconnect) {
@@ -373,19 +373,26 @@ class Connection extends EventEmitter {
     debug('[%s] connection closed', this.applicationId);
   }
 
-  async _closeRheaConnection(options) {
-    if (this._connection) {
-      debug('[%s] amqp: connection closing...', this.applicationId);
+  _closeRheaConnection(options) {
+    if (!this._connection) {
+      return Promise.resolve();
+    }
+
+    debug('[%s] amqp: connection (%s) closing...', this.applicationId, this._connection.id);
+
+    return new Promise((resolve, reject) => {
+      this._connection.once(ConnectionEvents.connectionClose, () => {
+        debug('[%s] amqp: connection (%s) closed', this.applicationId, this._connection.id);
+        resolve();
+      });
 
       // stop reconnect
       this._connection._connection.set_reconnect(false);
       debug('[%s] amqp: set reconnect false', this.applicationId);
 
       this._connection._connection.close();
-      await this._connection.close(options);
-      this._connection = null;
-      debug('[%s] amqp: connection closed', this.applicationId);
-    }
+      this._connection.close(options).catch(reject);
+    });
   }
 }
 
