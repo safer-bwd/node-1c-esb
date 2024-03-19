@@ -69,6 +69,8 @@ class Connection extends EventEmitter {
 
     // rhea connection object
     this._connection = null;
+
+    debug('[%s] initialized with options %o', this.applicationId, this._options);
   }
 
   get id() {
