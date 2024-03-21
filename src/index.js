@@ -151,19 +151,18 @@ class Connection extends EventEmitter {
     }
   }
 
-  getChannel(processName, channelName) {
-    const key = `${processName}.${channelName}`;
-    return this._channels.get(key);
+  getChannel(channelName) {
+    return this._channels.get(channelName);
   }
 
-  async createAwaitableSender(processName, channelName, options = {}) {
+  async createAwaitableSender(channelName, options = {}) {
     if (!this.isOpen()) {
       throw new Error('Connection is closed!');
     }
 
-    const channel = this.getChannel(processName, channelName);
+    const channel = this.getChannel(channelName);
     if (!channel) {
-      throw new Error(`Channel '${channelName}' for process '${processName}' not found`);
+      throw new Error(`Channel '${channelName}' not found`);
     }
 
     const sender = await this._connection.createAwaitableSender(merge(options, {
@@ -173,14 +172,14 @@ class Connection extends EventEmitter {
     return sender;
   }
 
-  async createSender(processName, channelName, options = {}) {
+  async createSender(channelName, options = {}) {
     if (!this.isOpen()) {
       throw new Error('Connection is closed!');
     }
 
-    const channel = this.getChannel(processName, channelName);
+    const channel = this.getChannel(channelName);
     if (!channel) {
-      throw new Error(`Channel '${channelName}' for process '${processName}' not found`);
+      throw new Error(`Channel '${channelName}' not found`);
     }
 
     const sender = await this._connection.createSender(merge(options, {
@@ -190,14 +189,14 @@ class Connection extends EventEmitter {
     return sender;
   }
 
-  async createReceiver(processName, channelName, options = {}) {
+  async createReceiver(channelName, options = {}) {
     if (!this.isOpen()) {
       throw new Error('Connection is closed!');
     }
 
-    const channel = this.getChannel(processName, channelName);
+    const channel = this.getChannel(channelName);
     if (!channel) {
-      throw new Error(`Channel '${channelName}' for process '${processName}' not found`);
+      throw new Error(`Channel '${channelName}' not found`);
     }
 
     const receiver = await this._connection.createReceiver(merge(options, {
@@ -216,8 +215,8 @@ class Connection extends EventEmitter {
       token = await this._fetchToken(options);
       const channels = await this._fetchChannels(token, options);
       this._channels = new Map(channels.map((channel) => {
-        const key = `${channel.process}.${channel.channel}`;
-        return [key, channel];
+        const channelName = `${channel.process}.${channel.channel}`;
+        return [channelName, channel];
       }));
     } catch (error) {
       this.emit(ConnectionEvents.connectionError, { error });
