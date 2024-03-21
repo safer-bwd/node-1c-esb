@@ -375,27 +375,14 @@ class Connection extends EventEmitter {
     debug('[%s] connection closed', this.applicationId);
   }
 
-  _closeRheaConnection(options) {
-    if (!this._connection) {
-      return Promise.resolve();
-    }
-
-    return new Promise((resolve, reject) => {
-      debug('[%s] amqp: connection (%s) closing...', this.applicationId, this._connection.id);
-
-      const onClose = () => {
-        debug('[%s] amqp: connection %s closed', this.applicationId, this._connection.id);
-        resolve();
-      };
-
-      // stop reconnect
-      this._connection._connection.set_reconnect(false);
+  async _closeRheaConnection(options) {
+    if (this._connection) {
+      this._connection._connection.set_reconnect(false); // stop reconnect
       debug('[%s] amqp: set reconnect false', this.applicationId);
 
-      this._connection.once(ConnectionEvents.connectionClose, onClose);
-      this._connection._connection.close();
-      this._connection.close(options).catch(reject);
-    });
+      await this._connection.close(options);
+      debug('[%s] amqp: connection %s closed', this.applicationId, this._connection.id);
+    }
   }
 }
 
