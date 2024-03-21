@@ -383,16 +383,16 @@ class Connection extends EventEmitter {
     return new Promise((resolve, reject) => {
       debug('[%s] amqp: connection (%s) closing...', this.applicationId, this._connection.id);
 
-      this._connection.once(ConnectionEvents.connectionClose, () => {
-        debug('[%s] amqp: connection (%s) closed', this.applicationId, this._connection.id);
-        this._connection = null;
+      const onClose = () => {
+        debug('[%s] amqp: connection %s closed', this.applicationId, this._connection.id);
         resolve();
-      });
+      };
 
       // stop reconnect
       this._connection._connection.set_reconnect(false);
       debug('[%s] amqp: set reconnect false', this.applicationId);
 
+      this._connection.once(ConnectionEvents.connectionClose, onClose);
       this._connection._connection.close();
       this._connection.close(options).catch(reject);
     });
