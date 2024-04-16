@@ -17,7 +17,6 @@ const defaultOpts = {
   clientSecret: '',
 
   operationTimeoutInSeconds: 60,
-  maxListeners: 100,
 
   // rhea connection options
   // https://github.com/amqp/rhea#connectoptions
@@ -359,7 +358,8 @@ class Connection extends EventEmitter {
     }
 
     // fix bug: https://github.com/amqp/rhea-promise/pull/78
-    this._connection._connection.setMaxListeners(this._options.maxListeners);
+    const maxListeners = 100;
+    this._connection._connection.setMaxListeners(maxListeners);
 
     debug('[%s] amqp: connection (%s) opened', this.applicationId, this._connection.id);
 
