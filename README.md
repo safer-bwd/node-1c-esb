@@ -12,4 +12,4 @@ npm install 1c-esb --save
 
 ## Usage
 
-See [Examples](https://github.com/safer-bwd/node-1c-esb/tree/b5fcfe3e8864358c5614d9856864c803452af187/examples)
+See [Examples](https://github.com/safer-bwd/node-1c-esb/tree/main/examples)
